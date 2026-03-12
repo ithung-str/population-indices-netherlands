@@ -5,6 +5,7 @@ import cbsodata
 
 st.set_page_config(page_title="Population Indices - Dutch Municipalities", layout="wide")
 st.title("Population Indices for Dutch Municipalities")
+st.caption("Quick insight by Structural Collective · Data: [CBS StatLine](https://opendata.cbs.nl/) — table 03759ned (Bevolking op 1 januari)")
 
 
 @st.cache_data(ttl=86400)
