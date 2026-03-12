@@ -3,35 +3,35 @@ import streamlit.components.v1 as components
 import pandas as pd
 import cbsodata
 
+_copy_counter = 0
+
 
 def copy_button(text, label="Copy to clipboard"):
     """Render a button that copies text to clipboard via JS."""
+    global _copy_counter
+    _copy_counter += 1
+    uid = f"_cb_{_copy_counter}"
     import html as html_mod
     escaped = html_mod.escape(text).replace("`", "&#96;")
     components.html(
         f"""
-        <button onclick="navigator.clipboard.writeText(document.getElementById('_cb').innerText)"
+        <button onclick="navigator.clipboard.writeText(document.getElementById('{uid}').innerText)"
                 style="padding:0.4em 1em;border:1px solid #ccc;border-radius:6px;
                        background:#f0f2f6;cursor:pointer;font-size:14px;">
             {label}
         </button>
-        <span id="_cb" style="display:none">{escaped}</span>
+        <span id="{uid}" style="display:none">{escaped}</span>
         """,
         height=45,
     )
 
-st.title("CBS Municipality Data Explorer")
-st.caption(
-    "Quick insight by Structural Collective · "
-    "Browse and query any [CBS StatLine](https://opendata.cbs.nl/) table with municipality-level data"
-)
+
+# ── Cached data loaders ─────────────────────────────────────────────────────
 
 
 @st.cache_data(ttl=86400, show_spinner="Loading CBS table catalogue...")
 def load_table_list():
-    """Fetch the full CBS table catalogue and filter for municipality-relevant tables."""
     tables = pd.DataFrame(cbsodata.get_table_list())
-    # Keep tables that mention gemeente/regio in title or summary
     mask = (
         tables["Title"].str.contains("regio|gemeente|wijk|buurt|provinc", case=False, na=False)
         | tables["Summary"].str.contains("gemeente", case=False, na=False)
@@ -39,13 +39,11 @@ def load_table_list():
     relevant = tables[mask][
         ["Identifier", "Title", "Summary", "Period", "RecordCount", "Updated"]
     ].copy()
-    relevant = relevant.sort_values("Updated", ascending=False).reset_index(drop=True)
-    return relevant
+    return relevant.sort_values("Updated", ascending=False).reset_index(drop=True)
 
 
 @st.cache_data(ttl=86400, show_spinner="Fetching table metadata...")
 def load_table_info(table_id):
-    """Get column metadata for a CBS table."""
     meta = cbsodata.get_meta(table_id, "DataProperties")
     props = pd.DataFrame(meta)
     return props[["Key", "Title", "Description", "Type"]].dropna(subset=["Key"])
@@ -53,7 +51,6 @@ def load_table_info(table_id):
 
 @st.cache_data(ttl=86400, show_spinner="Fetching dimension values...")
 def load_dimension_values(table_id, dimension_key):
-    """Fetch the valid keys/titles for a dimension."""
     try:
         values = cbsodata.get_meta(table_id, dimension_key)
         return [(v.get("Key", "").strip(), v.get("Title", "").strip()) for v in values]
@@ -61,13 +58,50 @@ def load_dimension_values(table_id, dimension_key):
         return []
 
 
-def build_llm_prompt(table_id, props_df):
-    """Build a prompt with all metadata an LLM needs to write a CBS query."""
+@st.cache_data(ttl=86400, show_spinner="Fetching data from CBS...")
+def load_table_data(table_id, odata_filter):
+    if odata_filter:
+        data = cbsodata.get_data(table_id, filters=odata_filter)
+    else:
+        data = cbsodata.get_data(table_id)
+    return pd.DataFrame(data)
+
+
+# ── Prompt builders ──────────────────────────────────────────────────────────
+
+
+@st.cache_data(ttl=86400)
+def build_catalogue_prompt(cat_df):
+    lines = [
+        "Below is a catalogue of CBS (Statistics Netherlands) tables with municipality-level data.",
+        "I need your help finding the right table for my use case.",
+        "",
+        "## Instructions",
+        "",
+        "1. I will describe what data I need.",
+        "2. Recommend the best table(s) from the catalogue below.",
+        "3. For each recommendation, explain what data it contains and why it fits.",
+        "4. Give me the table ID (Identifier) so I can explore it further.",
+        "",
+        "## Available tables",
+        "",
+    ]
+    for _, row in cat_df.iterrows():
+        lines.append(f"- **{row['Identifier']}**: {row['Title']}")
+        if row.get("Summary"):
+            lines.append(f"  {row['Summary']}")
+        if row.get("Period"):
+            lines.append(f"  Period: {row['Period']}")
+    lines.extend(["", "---", "", "What data am I looking for: <DESCRIBE YOUR NEED HERE>"])
+    return "\n".join(lines)
+
+
+def build_table_prompt(table_id, props_df):
     dimensions = props_df[props_df["Type"].isin(["Dimension", "GeoDimension", "TimeDimension"])]
     topics = props_df[props_df["Type"] == "Topic"]
 
     lines = [
-        f"I need help writing a Python query for CBS table `{table_id}` using the `cbsodata` package.",
+        f"I need help querying CBS table `{table_id}`.",
         "",
         "## Table columns",
         "",
@@ -75,11 +109,8 @@ def build_llm_prompt(table_id, props_df):
     ]
 
     for _, row in dimensions.iterrows():
-        key = row["Key"]
-        title = row["Title"]
-        dim_type = row["Type"]
-        lines.append(f"\n**{key}** ({title}, {dim_type})")
-        values = load_dimension_values(table_id, key)
+        lines.append(f"\n**{row['Key']}** ({row['Title']}, {row['Type']})")
+        values = load_dimension_values(table_id, row["Key"])
         if values:
             lines.append("Valid keys:")
             for k, t in values[:50]:
@@ -96,14 +127,12 @@ def build_llm_prompt(table_id, props_df):
         "",
         "## Instructions",
         "",
-        "DO NOT return Python code. Instead, return ONLY the following two things:",
+        "DO NOT return Python code. Return ONLY:",
         "",
-        "1. **OData filter** — a single filter string I can paste directly into a filter input field.",
+        "1. **OData filter** — a single string I can paste into a filter field.",
         "2. **Columns** — a comma-separated list of column keys to select.",
         "",
-        "## Response format",
-        "",
-        "Respond exactly like this:",
+        "## Required response format",
         "",
         "**OData filter:**",
         "`substringof('GM',RegioS) and Perioden eq '2024JJ00'`",
@@ -114,7 +143,7 @@ def build_llm_prompt(table_id, props_df):
         "**Explanation:**",
         "(brief explanation of what the filter does and why these columns were chosen)",
         "",
-        "## OData filter syntax reference",
+        "## OData filter syntax",
         "",
         "- Equality: `Perioden eq '2024JJ00'`",
         "- Substring match: `substringof('GM',RegioS)` (municipalities only)",
@@ -128,23 +157,35 @@ def build_llm_prompt(table_id, props_df):
     return "\n".join(lines)
 
 
-@st.cache_data(ttl=86400, show_spinner="Fetching data from CBS...")
-def load_table_data(table_id, odata_filter):
-    """Fetch data from a CBS table with an optional OData filter."""
-    if odata_filter:
-        data = cbsodata.get_data(table_id, filters=odata_filter)
-    else:
-        data = cbsodata.get_data(table_id)
-    return pd.DataFrame(data)
+# ── Page layout ──────────────────────────────────────────────────────────────
 
+st.title("CBS Municipality Data Explorer")
+st.caption(
+    "Quick insight by Structural Collective · "
+    "Browse and query any [CBS StatLine](https://opendata.cbs.nl/) table with municipality-level data"
+)
 
-# --- Table catalogue ---
-st.subheader("Available tables")
+st.info(
+    "**How to use this page:**\n\n"
+    "**Step 1** — Find a table: search the catalogue below, or copy the catalogue prompt "
+    "and ask an LLM to recommend a table.\n\n"
+    "**Step 2** — Enter the table ID to see its columns and dimensions.\n\n"
+    "**Step 3** — Build your query: either copy the table prompt and ask an LLM for the "
+    "right OData filter + columns, or fill them in yourself.\n\n"
+    "**Step 4** — Paste the LLM's filter and columns into the query fields, then click Fetch."
+)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 1: Find a table
+# ═══════════════════════════════════════════════════════════════════════════════
+
+st.header("Step 1: Find a table")
+
 catalogue = load_table_list()
 
 search = st.text_input(
     "Search tables",
-    placeholder="e.g. inkomen, wonen, bodemgebruik, criminaliteit, wegen...",
+    placeholder="e.g. inkomen, wonen, bodemgebruik, criminaliteit, wegen, zonnepanelen...",
 )
 if search:
     terms = search.lower().split()
@@ -161,162 +202,107 @@ else:
 st.caption(f"{len(display_cat)} tables found")
 st.dataframe(display_cat, width="stretch", height=300)
 
-# --- Full catalogue LLM prompt ---
-st.markdown("---")
-st.subheader("Ask an LLM which table to use")
 st.markdown(
-    "Don't know which table you need? Copy the full catalogue below and paste it into "
-    "an LLM. Describe what data you're looking for and it will recommend a table ID. "
-    "Then enter that ID in the section below to explore it."
+    "**Not sure which table?** Copy the full catalogue and ask an LLM. "
+    "Replace `<DESCRIBE YOUR NEED HERE>` at the bottom with your question."
 )
-
-
-@st.cache_data(ttl=86400)
-def build_catalogue_prompt(cat_df):
-    lines = [
-        "Below is a catalogue of CBS (Statistics Netherlands) tables that contain municipality-level data.",
-        "I need your help finding the right table for my use case.",
-        "",
-        "## Instructions",
-        "",
-        "1. I will describe what data I need.",
-        "2. Recommend the best table(s) from the catalogue below.",
-        "3. For each recommendation, explain what data the table contains and why it fits.",
-        "4. Give me the table ID (Identifier) so I can explore it further.",
-        "",
-        "## Available tables",
-        "",
-    ]
-    for _, row in cat_df.iterrows():
-        lines.append(f"- **{row['Identifier']}**: {row['Title']}")
-        if row.get("Summary"):
-            lines.append(f"  {row['Summary']}")
-        if row.get("Period"):
-            lines.append(f"  Period: {row['Period']}")
-    lines.extend([
-        "",
-        "---",
-        "",
-        "What data am I looking for: <DESCRIBE YOUR NEED HERE>",
-    ])
-    return "\n".join(lines)
-
-
 catalogue_prompt = build_catalogue_prompt(catalogue)
-
 copy_button(catalogue_prompt, f"Copy catalogue prompt ({len(catalogue)} tables)")
 
-with st.expander("Preview full catalogue prompt"):
+with st.expander("Preview catalogue prompt"):
     st.markdown(catalogue_prompt)
 
-llm_table_response = st.text_area(
-    "Paste LLM response here",
-    placeholder="Paste the LLM's table recommendation here...",
-    height=150,
-    key="catalogue_llm_response",
-)
-if llm_table_response:
-    st.markdown("**LLM recommendation:**")
-    st.markdown(llm_table_response)
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 2: Explore a table
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# --- Table selection ---
-st.markdown("---")
-st.subheader("Explore a table")
+st.header("Step 2: Explore a table")
 
 table_id = st.text_input(
-    "Enter a table ID from the list above",
-    placeholder="e.g. 70072ned",
+    "Enter a table ID",
+    placeholder="e.g. 70072ned, 85005NED",
 )
 
-if table_id:
-    table_id = table_id.strip()
+if not table_id:
+    st.stop()
 
-    # Show column metadata
-    try:
-        props = load_table_info(table_id)
-    except Exception as e:
-        st.error(f"Could not load metadata for '{table_id}': {e}")
-        st.stop()
+table_id = table_id.strip()
 
-    st.markdown(f"**Columns in `{table_id}`** ({len(props)} fields)")
-    st.dataframe(props, width="stretch", height=300)
+try:
+    props = load_table_info(table_id)
+except Exception as e:
+    st.error(f"Could not load metadata for '{table_id}': {e}")
+    st.stop()
 
-    # LLM prompt copy button
-    st.markdown("---")
-    st.subheader("Ask an LLM to build your query")
-    st.markdown(
-        "Click the button below to copy the full table metadata (dimensions, valid filter "
-        "values, and data columns) along with instructions. Paste it into ChatGPT, Claude, "
-        "or any LLM to get a ready-to-use `cbsodata` query. Then paste the OData filter "
-        "and column selection back into the query section below."
-    )
+st.markdown(f"**Columns in `{table_id}`** ({len(props)} fields)")
+st.dataframe(props, width="stretch", height=300)
 
-    llm_prompt = build_llm_prompt(table_id, props)
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 3: Get the right filter from an LLM
+# ═══════════════════════════════════════════════════════════════════════════════
 
-    copy_button(llm_prompt, f"Copy table prompt ({table_id})")
+st.header("Step 3: Get the right filter")
+st.markdown(
+    "Copy the table prompt below and paste it into an LLM (ChatGPT, Claude, etc.). "
+    "Describe what you want to query. The LLM will return an **OData filter** and "
+    "**column list** — paste those into Step 4."
+)
 
-    with st.expander("Preview full table prompt"):
-        st.markdown(llm_prompt)
+llm_prompt = build_table_prompt(table_id, props)
+copy_button(llm_prompt, f"Copy table prompt ({table_id})")
 
-    # Paste LLM response
-    st.markdown("---")
-    st.subheader("Paste LLM response")
-    st.markdown(
-        "Paste the LLM's response below. It will be rendered for reference "
-        "while you fill in the filter and columns below."
-    )
-    llm_response = st.text_area(
-        "LLM response",
-        placeholder="Paste the LLM's suggested code/query here...",
-        height=200,
-        key="table_llm_response",
-    )
-    if llm_response:
-        st.markdown("**LLM suggestion:**")
-        st.markdown(llm_response)
+with st.expander("Preview table prompt"):
+    st.markdown(llm_prompt)
 
-    # Filter builder
-    st.markdown("---")
-    st.subheader("Query data")
-    st.markdown(
-        "Use OData filters to narrow results. For municipality data, try: "
-        "`substringof('GM',RegioS)` to get only municipalities. "
-        "Combine with `and` — e.g. `substringof('GM',RegioS) and Perioden eq '2024JJ00'`"
-    )
+llm_response = st.text_area(
+    "Paste LLM response here (for your reference)",
+    placeholder="The LLM will give you an OData filter and column list — paste it here to keep it visible while you fill in Step 4 below.",
+    height=150,
+    key="table_llm_response",
+)
+if llm_response:
+    st.markdown(llm_response)
 
-    odata_filter = st.text_input(
-        "OData filter (optional — leave empty to fetch all rows)",
-        placeholder="substringof('GM',RegioS) and Perioden eq '2024JJ00'",
-    )
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 4: Fetch data
+# ═══════════════════════════════════════════════════════════════════════════════
 
-    col_options = props["Key"].tolist()
-    selected_cols = st.multiselect(
-        "Select columns to display (leave empty for all)",
-        options=col_options,
-    )
+st.header("Step 4: Fetch data")
+st.markdown("Paste the **OData filter** and select the **columns** from the LLM response above, then click Fetch.")
 
-    if st.button("Fetch data", type="primary", key="fetch_manual"):
-        with st.spinner("Querying CBS..."):
-            try:
-                data = load_table_data(table_id, odata_filter if odata_filter else None)
-            except Exception as e:
-                st.error(f"Query failed: {e}")
-                st.stop()
+odata_filter = st.text_input(
+    "OData filter",
+    placeholder="substringof('GM',RegioS) and Perioden eq '2025JJ00'",
+)
 
-        if selected_cols:
-            available = [c for c in selected_cols if c in data.columns]
-            if available:
-                data = data[available]
+col_options = props["Key"].tolist()
+selected_cols = st.multiselect(
+    "Columns (leave empty for all)",
+    options=col_options,
+)
 
-        st.success(f"Loaded {len(data):,} rows × {len(data.columns)} columns")
+if st.button("Fetch data", type="primary"):
+    with st.spinner("Querying CBS..."):
+        try:
+            data = load_table_data(table_id, odata_filter if odata_filter else None)
+        except Exception as e:
+            st.error(f"Query failed: {e}")
+            st.stop()
 
-        numeric_cols = data.select_dtypes(include="number").columns.tolist()
-        if numeric_cols:
-            st.markdown("**Quick stats for numeric columns**")
-            st.dataframe(data[numeric_cols].describe().round(1), width="stretch")
+    if selected_cols:
+        available = [c for c in selected_cols if c in data.columns]
+        if available:
+            data = data[available]
 
-        st.markdown("**Data**")
-        st.dataframe(data, width="stretch", height=500)
+    st.success(f"Loaded {len(data):,} rows x {len(data.columns)} columns")
 
-        csv = data.to_csv(index=False).encode("utf-8")
-        st.download_button("Download as CSV", csv, f"{table_id}.csv", "text/csv")
+    numeric_cols = data.select_dtypes(include="number").columns.tolist()
+    if numeric_cols:
+        st.markdown("**Quick stats**")
+        st.dataframe(data[numeric_cols].describe().round(1), width="stretch")
+
+    st.markdown("**Data**")
+    st.dataframe(data, width="stretch", height=500)
+
+    csv = data.to_csv(index=False).encode("utf-8")
+    st.download_button("Download as CSV", csv, f"{table_id}.csv", "text/csv")
