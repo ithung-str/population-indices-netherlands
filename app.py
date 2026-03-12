@@ -3,7 +3,8 @@ import pandas as pd
 import altair as alt
 import cbsodata
 
-st.set_page_config(page_title="Population Indices - Dutch Municipalities", layout="wide")
+st.set_page_config(page_title="Dutch Municipality Data — Structural Collective", layout="wide")
+
 st.title("Population Indices for Dutch Municipalities")
 st.caption("Quick insight by Structural Collective · Data: [CBS StatLine](https://opendata.cbs.nl/) — table 03759ned (Bevolking op 1 januari)")
 
