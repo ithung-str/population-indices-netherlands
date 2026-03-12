@@ -7,6 +7,7 @@ st.set_page_config(
 
 pages = st.navigation([
     st.Page("pages/0_Population_Indices.py", title="Population Indices", icon=":material/bar_chart:"),
+    st.Page("pages/2_Road_Infrastructure_Indices.py", title="Road Infrastructure", icon=":material/road:"),
     st.Page("pages/1_CBS_Data_Explorer.py", title="CBS Data Explorer", icon=":material/search:"),
 ])
 
