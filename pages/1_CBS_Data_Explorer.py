@@ -1,6 +1,24 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import cbsodata
+
+
+def copy_button(text, label="Copy to clipboard"):
+    """Render a button that copies text to clipboard via JS."""
+    import html as html_mod
+    escaped = html_mod.escape(text).replace("`", "&#96;")
+    components.html(
+        f"""
+        <button onclick="navigator.clipboard.writeText(document.getElementById('_cb').innerText)"
+                style="padding:0.4em 1em;border:1px solid #ccc;border-radius:6px;
+                       background:#f0f2f6;cursor:pointer;font-size:14px;">
+            {label}
+        </button>
+        <span id="_cb" style="display:none">{escaped}</span>
+        """,
+        height=45,
+    )
 
 st.title("CBS Municipality Data Explorer")
 st.caption(
@@ -180,7 +198,7 @@ def build_catalogue_prompt(cat_df):
 
 catalogue_prompt = build_catalogue_prompt(catalogue)
 
-st.code(catalogue_prompt, language="markdown", wrap_lines=True, height=68)
+copy_button(catalogue_prompt, f"Copy catalogue prompt ({len(catalogue)} tables)")
 
 with st.expander("Preview full catalogue prompt"):
     st.markdown(catalogue_prompt)
@@ -229,7 +247,7 @@ if table_id:
 
     llm_prompt = build_llm_prompt(table_id, props)
 
-    st.code(llm_prompt, language="markdown", wrap_lines=True, height=68)
+    copy_button(llm_prompt, f"Copy table prompt ({table_id})")
 
     with st.expander("Preview full table prompt"):
         st.markdown(llm_prompt)
