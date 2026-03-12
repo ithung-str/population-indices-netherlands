@@ -256,12 +256,12 @@ if table_id:
     st.markdown("---")
     st.subheader("Paste LLM response")
     st.markdown(
-        "Got a response from the LLM? Paste it below for reference while you fill in "
-        "the query fields."
+        "Paste the LLM's response below. It will be rendered for reference "
+        "while you fill in the filter and columns below."
     )
     llm_response = st.text_area(
         "LLM response",
-        placeholder="Paste the LLM's suggested query here...",
+        placeholder="Paste the LLM's suggested code/query here...",
         height=200,
         key="table_llm_response",
     )
@@ -273,7 +273,7 @@ if table_id:
     st.markdown("---")
     st.subheader("Query data")
     st.markdown(
-        "Tip: use OData filters to narrow results. For municipality data, try: "
+        "Use OData filters to narrow results. For municipality data, try: "
         "`substringof('GM',RegioS)` to get only municipalities. "
         "Combine with `and` — e.g. `substringof('GM',RegioS) and Perioden eq '2024JJ00'`"
     )
@@ -289,7 +289,7 @@ if table_id:
         options=col_options,
     )
 
-    if st.button("Fetch data", type="primary"):
+    if st.button("Fetch data", type="primary", key="fetch_manual"):
         with st.spinner("Querying CBS..."):
             try:
                 data = load_table_data(table_id, odata_filter if odata_filter else None)
@@ -298,23 +298,19 @@ if table_id:
                 st.stop()
 
         if selected_cols:
-            # Always keep region/period columns if present
             available = [c for c in selected_cols if c in data.columns]
             if available:
                 data = data[available]
 
         st.success(f"Loaded {len(data):,} rows × {len(data.columns)} columns")
 
-        # Summary stats
         numeric_cols = data.select_dtypes(include="number").columns.tolist()
         if numeric_cols:
             st.markdown("**Quick stats for numeric columns**")
             st.dataframe(data[numeric_cols].describe().round(1), width="stretch")
 
-        # Data table
         st.markdown("**Data**")
         st.dataframe(data, width="stretch", height=500)
 
-        # Download
         csv = data.to_csv(index=False).encode("utf-8")
         st.download_button("Download as CSV", csv, f"{table_id}.csv", "text/csv")
