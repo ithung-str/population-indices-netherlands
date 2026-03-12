@@ -4,7 +4,10 @@ import altair as alt
 import cbsodata
 
 st.title("Road Infrastructure Indices for Dutch Municipalities")
-st.caption("Quick insight by Structural Collective · Data: [CBS StatLine](https://opendata.cbs.nl/) — table 70806ned (Lengte van wegen)")
+st.caption(
+    "Quick insight by Structural Collective · Data: [CBS StatLine](https://opendata.cbs.nl/) — table 70806ned (Lengte van wegen). "
+    "Road length is measured within the geographic boundaries of each municipality, regardless of road manager."
+)
 
 ROAD_TYPES = {
     "T001491": "Total road length",
@@ -41,6 +44,8 @@ year = ctrl2.selectbox("Year", list(range(2025, 2000, -1)), index=0)
 df = load_road_data(road_type_key, year)
 VALUE_COL = "Road Length (km)"
 
+st.markdown(f"**Showing: {road_type} — {year}**")
+
 # Compute indices
 mean_val = df[VALUE_COL].mean()
 median_val = df[VALUE_COL].median()
@@ -75,7 +80,7 @@ st.dataframe(
 )
 
 # Distribution chart
-st.subheader("Road Length Distribution")
+st.subheader(f"Road Length Distribution — {road_type} ({year})")
 sort_col1, sort_col2 = st.columns(2)
 sort_by = sort_col1.selectbox("Sort by", [VALUE_COL, "Index vs Mean", "Index vs Median", "Municipality"], key="road_sort")
 sort_order = sort_col2.selectbox("Order", ["Descending", "Ascending"], key="road_order")
@@ -98,7 +103,7 @@ st.altair_chart(chart, width="stretch")
 
 # Range explorer
 st.markdown("---")
-st.subheader("Road Length Range Explorer")
+st.subheader(f"Road Length Range Explorer — {road_type} ({year})")
 
 ranked = df.sort_values(VALUE_COL, ascending=False).reset_index(drop=True)
 ranked.index += 1
@@ -130,7 +135,7 @@ st.dataframe(
 
 # Road length bins
 st.markdown("---")
-st.subheader("Road Length Classification")
+st.subheader(f"Road Length Classification — {road_type} ({year})")
 
 BIN_EDGES = [0, 100, 200, 400, 600, 1000, 2000, float("inf")]
 BIN_LABELS = [
