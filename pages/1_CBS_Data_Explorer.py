@@ -180,9 +180,20 @@ def build_catalogue_prompt(cat_df):
 
 catalogue_prompt = build_catalogue_prompt(catalogue)
 
-with st.expander(f"Preview & copy full catalogue prompt ({len(catalogue)} tables)"):
-    st.code(catalogue_prompt, language="markdown")
-    st.caption("Use the copy icon in the top-right of the code block to copy. Then paste into an LLM and replace the placeholder at the bottom with your question.")
+st.code(catalogue_prompt, language="markdown", wrap_lines=True, height=68)
+
+with st.expander("Preview full catalogue prompt"):
+    st.markdown(catalogue_prompt)
+
+llm_table_response = st.text_area(
+    "Paste LLM response here",
+    placeholder="Paste the LLM's table recommendation here...",
+    height=150,
+    key="catalogue_llm_response",
+)
+if llm_table_response:
+    st.markdown("**LLM recommendation:**")
+    st.markdown(llm_table_response)
 
 # --- Table selection ---
 st.markdown("---")
@@ -218,9 +229,10 @@ if table_id:
 
     llm_prompt = build_llm_prompt(table_id, props)
 
-    with st.expander("Preview & copy LLM prompt"):
-        st.code(llm_prompt, language="markdown")
-        st.caption("Use the copy icon in the top-right of the code block above to copy the prompt.")
+    st.code(llm_prompt, language="markdown", wrap_lines=True, height=68)
+
+    with st.expander("Preview full table prompt"):
+        st.markdown(llm_prompt)
 
     # Paste LLM response
     st.markdown("---")
@@ -233,6 +245,7 @@ if table_id:
         "LLM response",
         placeholder="Paste the LLM's suggested query here...",
         height=200,
+        key="table_llm_response",
     )
     if llm_response:
         st.markdown("**LLM suggestion:**")
