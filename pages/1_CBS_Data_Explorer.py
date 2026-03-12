@@ -137,6 +137,53 @@ else:
 st.caption(f"{len(display_cat)} tables found")
 st.dataframe(display_cat, width="stretch", height=300)
 
+# --- Full catalogue LLM prompt ---
+st.markdown("---")
+st.subheader("Ask an LLM which table to use")
+st.markdown(
+    "Don't know which table you need? Copy the full catalogue below and paste it into "
+    "an LLM. Describe what data you're looking for and it will recommend a table ID. "
+    "Then enter that ID in the section below to explore it."
+)
+
+
+@st.cache_data(ttl=86400)
+def build_catalogue_prompt(cat_df):
+    lines = [
+        "Below is a catalogue of CBS (Statistics Netherlands) tables that contain municipality-level data.",
+        "I need your help finding the right table for my use case.",
+        "",
+        "## Instructions",
+        "",
+        "1. I will describe what data I need.",
+        "2. Recommend the best table(s) from the catalogue below.",
+        "3. For each recommendation, explain what data the table contains and why it fits.",
+        "4. Give me the table ID (Identifier) so I can explore it further.",
+        "",
+        "## Available tables",
+        "",
+    ]
+    for _, row in cat_df.iterrows():
+        lines.append(f"- **{row['Identifier']}**: {row['Title']}")
+        if row.get("Summary"):
+            lines.append(f"  {row['Summary']}")
+        if row.get("Period"):
+            lines.append(f"  Period: {row['Period']}")
+    lines.extend([
+        "",
+        "---",
+        "",
+        "What data am I looking for: <DESCRIBE YOUR NEED HERE>",
+    ])
+    return "\n".join(lines)
+
+
+catalogue_prompt = build_catalogue_prompt(catalogue)
+
+with st.expander(f"Preview & copy full catalogue prompt ({len(catalogue)} tables)"):
+    st.code(catalogue_prompt, language="markdown")
+    st.caption("Use the copy icon in the top-right of the code block to copy. Then paste into an LLM and replace the placeholder at the bottom with your question.")
+
 # --- Table selection ---
 st.markdown("---")
 st.subheader("Explore a table")
@@ -174,6 +221,22 @@ if table_id:
     with st.expander("Preview & copy LLM prompt"):
         st.code(llm_prompt, language="markdown")
         st.caption("Use the copy icon in the top-right of the code block above to copy the prompt.")
+
+    # Paste LLM response
+    st.markdown("---")
+    st.subheader("Paste LLM response")
+    st.markdown(
+        "Got a response from the LLM? Paste it below for reference while you fill in "
+        "the query fields."
+    )
+    llm_response = st.text_area(
+        "LLM response",
+        placeholder="Paste the LLM's suggested query here...",
+        height=200,
+    )
+    if llm_response:
+        st.markdown("**LLM suggestion:**")
+        st.markdown(llm_response)
 
     # Filter builder
     st.markdown("---")
