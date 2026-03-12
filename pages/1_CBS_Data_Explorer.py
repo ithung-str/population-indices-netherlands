@@ -33,6 +33,77 @@ def load_table_info(table_id):
     return props[["Key", "Title", "Description", "Type"]].dropna(subset=["Key"])
 
 
+@st.cache_data(ttl=86400, show_spinner="Fetching dimension values...")
+def load_dimension_values(table_id, dimension_key):
+    """Fetch the valid keys/titles for a dimension."""
+    try:
+        values = cbsodata.get_meta(table_id, dimension_key)
+        return [(v.get("Key", "").strip(), v.get("Title", "").strip()) for v in values]
+    except Exception:
+        return []
+
+
+def build_llm_prompt(table_id, props_df):
+    """Build a prompt with all metadata an LLM needs to write a CBS query."""
+    dimensions = props_df[props_df["Type"].isin(["Dimension", "GeoDimension", "TimeDimension"])]
+    topics = props_df[props_df["Type"] == "Topic"]
+
+    lines = [
+        f"I need help writing a Python query for CBS table `{table_id}` using the `cbsodata` package.",
+        "",
+        "## Table columns",
+        "",
+        "### Dimensions (used in OData filters)",
+    ]
+
+    for _, row in dimensions.iterrows():
+        key = row["Key"]
+        title = row["Title"]
+        dim_type = row["Type"]
+        lines.append(f"\n**{key}** ({title}, {dim_type})")
+        values = load_dimension_values(table_id, key)
+        if values:
+            lines.append("Valid keys:")
+            for k, t in values[:50]:
+                lines.append(f"  - `{k}` = {t}")
+            if len(values) > 50:
+                lines.append(f"  - ... and {len(values) - 50} more values")
+
+    lines.append("\n### Data columns (topic columns)")
+    for _, row in topics.iterrows():
+        desc = f" — {row['Description']}" if row["Description"] else ""
+        lines.append(f"- `{row['Key']}`: {row['Title']}{desc}")
+
+    lines.extend([
+        "",
+        "## Instructions",
+        "",
+        "Write a Python snippet using `cbsodata.get_data()` to query this table.",
+        "Use the `filters` parameter for OData filtering and `select` to pick columns.",
+        "",
+        "Example pattern:",
+        "```python",
+        "import cbsodata",
+        f"data = cbsodata.get_data('{table_id}',",
+        "    filters=\"<OData filter here>\",",
+        "    select=['<col1>', '<col2>']",
+        ")",
+        "```",
+        "",
+        "OData filter syntax:",
+        "- Equality: `Perioden eq '2024JJ00'`",
+        "- Substring match: `substringof('GM',RegioS)` (municipalities only)",
+        "- Combine with `and`: `substringof('GM',RegioS) and Perioden eq '2024JJ00'`",
+        "- Year format: `'YYYYJJnn'` (e.g. `'2024JJ00'`), month: `'YYYYMMnn'`",
+        "- Dimension keys must match exactly (including trailing spaces if any)",
+        "",
+        "For municipality data, always filter with `substringof('GM',RegioS)` to get only gemeenten.",
+        "Filter out rows with None values in the result — defunct municipalities return None for recent periods.",
+    ])
+
+    return "\n".join(lines)
+
+
 @st.cache_data(ttl=86400, show_spinner="Fetching data from CBS...")
 def load_table_data(table_id, odata_filter):
     """Fetch data from a CBS table with an optional OData filter."""
@@ -87,6 +158,22 @@ if table_id:
 
     st.markdown(f"**Columns in `{table_id}`** ({len(props)} fields)")
     st.dataframe(props, width="stretch", height=300)
+
+    # LLM prompt copy button
+    st.markdown("---")
+    st.subheader("Ask an LLM to build your query")
+    st.markdown(
+        "Click the button below to copy the full table metadata (dimensions, valid filter "
+        "values, and data columns) along with instructions. Paste it into ChatGPT, Claude, "
+        "or any LLM to get a ready-to-use `cbsodata` query. Then paste the OData filter "
+        "and column selection back into the query section below."
+    )
+
+    llm_prompt = build_llm_prompt(table_id, props)
+
+    with st.expander("Preview & copy LLM prompt"):
+        st.code(llm_prompt, language="markdown")
+        st.caption("Use the copy icon in the top-right of the code block above to copy the prompt.")
 
     # Filter builder
     st.markdown("---")
