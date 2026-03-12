@@ -63,7 +63,7 @@ st.markdown(
 # Display table
 st.dataframe(
     filtered.style.format({"Population": "{:,.0f}", "Index vs Mean": "{:.2f}", "Index vs Median": "{:.2f}"}),
-    use_container_width=True,
+    width="stretch",
     height=600,
 )
 
@@ -90,7 +90,7 @@ chart = (
     )
     .properties(height=400)
 )
-st.altair_chart(chart, use_container_width=True)
+st.altair_chart(chart, width="stretch")
 
 # Range explorer
 st.markdown("---")
@@ -120,7 +120,7 @@ mc3.metric("Share of total", f"{selected_pct:.1f}%")
 st.dataframe(
     selected[["Municipality", "Population", "Index vs Mean", "Index vs Median"]]
     .style.format({"Population": "{:,.0f}", "Index vs Mean": "{:.2f}", "Index vs Median": "{:.2f}"}),
-    use_container_width=True,
+    width="stretch",
 )
 
 # Population bins
@@ -159,7 +159,7 @@ st.dataframe(
         "Mean_Population": "{:,.0f}",
         "Share of Total": "{:.1f}%",
     }),
-    use_container_width=True,
+    width="stretch",
 )
 
 # Bin charts side by side
@@ -177,7 +177,7 @@ with bin_col1:
         )
         .properties(height=300)
     )
-    st.altair_chart(count_chart, use_container_width=True)
+    st.altair_chart(count_chart, width="stretch")
 
 with bin_col2:
     st.markdown("**Share of total population per category**")
@@ -191,7 +191,7 @@ with bin_col2:
         )
         .properties(height=300)
     )
-    st.altair_chart(share_chart, use_container_width=True)
+    st.altair_chart(share_chart, width="stretch")
 
 # Merge adjacent bins
 st.markdown("**Combine adjacent categories**")
@@ -217,5 +217,5 @@ cc3.metric("Share of total", f"{combined_pct:.1f}%")
 st.dataframe(
     combined_df.sort_values("Population", ascending=False)[["Municipality", "Population", "Category", "Index vs Mean", "Index vs Median"]]
     .style.format({"Population": "{:,.0f}", "Index vs Mean": "{:.2f}", "Index vs Median": "{:.2f}"}),
-    use_container_width=True,
+    width="stretch",
 )

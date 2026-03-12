@@ -64,7 +64,7 @@ else:
     display_cat = catalogue
 
 st.caption(f"{len(display_cat)} tables found")
-st.dataframe(display_cat, use_container_width=True, height=300)
+st.dataframe(display_cat, width="stretch", height=300)
 
 # --- Table selection ---
 st.markdown("---")
@@ -86,7 +86,7 @@ if table_id:
         st.stop()
 
     st.markdown(f"**Columns in `{table_id}`** ({len(props)} fields)")
-    st.dataframe(props, use_container_width=True, height=300)
+    st.dataframe(props, width="stretch", height=300)
 
     # Filter builder
     st.markdown("---")
@@ -128,11 +128,11 @@ if table_id:
         numeric_cols = data.select_dtypes(include="number").columns.tolist()
         if numeric_cols:
             st.markdown("**Quick stats for numeric columns**")
-            st.dataframe(data[numeric_cols].describe().round(1), use_container_width=True)
+            st.dataframe(data[numeric_cols].describe().round(1), width="stretch")
 
         # Data table
         st.markdown("**Data**")
-        st.dataframe(data, use_container_width=True, height=500)
+        st.dataframe(data, width="stretch", height=500)
 
         # Download
         csv = data.to_csv(index=False).encode("utf-8")
